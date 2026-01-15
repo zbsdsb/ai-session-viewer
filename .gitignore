@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.log
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Swift/Xcode
+.build/
+*.xcodeproj
+*.xcworkspace
+*.swiftpm
+DerivedData/
+.swiftpm/
+*.xcuserstate
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Cache
+.cache/
+*.db
+*.db-journal
+
+# Local configuration
+.env
+local_config.json
+
+# Mac App build artifacts
+mac-app/.build/
+mac-app/DerivedData/
+
+# Session files (don't commit user's sessions)
+# Note: This is a session viewer tool, we keep example/test sessions
+# but exclude large session databases
+*.db
+!schema.sql
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
