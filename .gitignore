@@ -27,6 +27,7 @@ venv/
 env/
 ENV/
 .venv
+.venv-win-build/
 
 # IDEs
 .vscode/
@@ -77,3 +78,4 @@ mac-app/DerivedData/
 *.tmp
 *.bak
 *.swp
+*.spec

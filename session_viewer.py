@@ -28,6 +28,24 @@ from abc import ABC, abstractmethod
 import argparse
 
 
+def ensure_utf8_stdio():
+    """Use UTF-8 for Windows console output so emoji/CJK text do not crash."""
+    if sys.platform != "win32":
+        return
+
+    os.environ.setdefault("PYTHONUTF8", "1")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 # ============================================================
 # LLM 总结器配置
 # ============================================================
@@ -424,7 +442,7 @@ def extract_text_from_content(content) -> str:
         parts = []
         for item in content:
             if isinstance(item, dict):
-                if item.get("type") == "text" and item.get("text"):
+                if item.get("type") in {"text", "input_text", "output_text"} and item.get("text"):
                     parts.append(item.get("text"))
             elif isinstance(item, str):
                 parts.append(item)
@@ -540,7 +558,6 @@ class ClaudeSessionParser(SessionParser):
             last_time = None
             search_tokens = build_search_tokens(session_filter.search) if session_filter and session_filter.has_search() else []
             search_found = set()
-
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
@@ -767,6 +784,41 @@ class CodexSessionParser(SessionParser):
             user_messages = []
             search_tokens = build_search_tokens(session_filter.search) if session_filter and session_filter.has_search() else []
             search_found = set()
+            seen_user_messages = set()
+
+            def update_last_time(timestamp: Optional[str]):
+                nonlocal last_time
+                if not timestamp:
+                    return
+                try:
+                    parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                except Exception:
+                    return
+                if last_time is None or parsed > last_time:
+                    last_time = parsed
+
+            def add_user_message(message: str):
+                nonlocal first_message, message_count
+                clean = (message or "").strip()
+                if not clean:
+                    return
+                if clean.startswith("# AGENTS.md instructions") or clean.startswith("<environment_context>"):
+                    return
+                if clean in seen_user_messages:
+                    return
+
+                seen_user_messages.add(clean)
+                message_count += 1
+                if not first_message:
+                    first_message = clean[:100]
+                user_messages.append(clean)
+                if search_tokens:
+                    update_search_hits(search_tokens, search_found, clean)
+
+            def add_assistant_text(message: str):
+                clean = (message or "").strip()
+                if clean and search_tokens:
+                    update_search_hits(search_tokens, search_found, clean)
 
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line in f:
@@ -791,33 +843,35 @@ class CodexSessionParser(SessionParser):
 
                         # 获取用户消息
                         if msg_type == "message" and data.get("role") == "user":
-                            message_count += 1
                             content = data.get("content", "")
-                            msg_text = extract_text_from_content(content)
-                            if msg_text and not first_message:
-                                first_message = msg_text[:100]
-
-                            if msg_text:
-                                user_messages.append(msg_text)
-                                if search_tokens:
-                                    update_search_hits(search_tokens, search_found, msg_text)
-
-                            ts = data.get("timestamp")
-                            if ts:
-                                try:
-                                    last_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                                except:
-                                    pass
+                            add_user_message(extract_text_from_content(content))
 
                         # 获取模型信息
                         if msg_type == "message" and data.get("role") == "assistant":
                             if data.get("model") and not model:
                                 model = data.get("model", "")
-                            if search_tokens:
-                                content = data.get("content", "")
-                                msg_text = extract_text_from_content(content)
-                                if msg_text:
-                                    update_search_hits(search_tokens, search_found, msg_text)
+                            content = data.get("content", "")
+                            add_assistant_text(extract_text_from_content(content))
+
+                        if msg_type == "response_item":
+                            payload = data.get("payload", {})
+                            if payload.get("type") == "message":
+                                role = payload.get("role")
+                                msg_text = extract_text_from_content(payload.get("content", ""))
+                                if role == "user":
+                                    add_user_message(msg_text)
+                                elif role == "assistant":
+                                    add_assistant_text(msg_text)
+                                    if payload.get("model") and not model:
+                                        model = payload.get("model", "")
+
+                        if msg_type == "event_msg":
+                            payload = data.get("payload", {})
+                            event_type = payload.get("type")
+                            if event_type == "user_message":
+                                add_user_message(payload.get("message", ""))
+                            elif event_type == "agent_message":
+                                add_assistant_text(payload.get("message", ""))
 
                     except json.JSONDecodeError:
                         continue
@@ -882,6 +936,20 @@ class CodexSessionParser(SessionParser):
     def extract_search_text(self, file_path: str) -> str:
         """提取 Codex 会话的用户+助手消息文本"""
         parts = []
+        seen = set()
+
+        def add_content(content, *, skip_system=False):
+            text = extract_text_from_content(content).strip()
+            if not text or text in seen:
+                return
+            if skip_system and (
+                text.startswith("# AGENTS.md instructions")
+                or text.startswith("<environment_context>")
+            ):
+                return
+            seen.add(text)
+            parts.append(text)
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line in f:
@@ -890,14 +958,19 @@ class CodexSessionParser(SessionParser):
                         continue
                     try:
                         data = json.loads(line)
-                        if data.get("type") != "message":
-                            continue
-                        role = data.get("role", "")
-                        if role not in ("user", "assistant"):
-                            continue
-                        content = extract_text_from_content(data.get("content", ""))
-                        if content:
-                            parts.append(content)
+                        msg_type = data.get("type")
+                        if msg_type == "message":
+                            role = data.get("role", "")
+                            if role in ("user", "assistant"):
+                                add_content(data.get("content", ""), skip_system=(role == "user"))
+                        elif msg_type == "response_item":
+                            payload = data.get("payload", {})
+                            if payload.get("type") == "message" and payload.get("role") in ("user", "assistant"):
+                                add_content(payload.get("content", ""), skip_system=(payload.get("role") == "user"))
+                        elif msg_type == "event_msg":
+                            payload = data.get("payload", {})
+                            if payload.get("type") in ("user_message", "agent_message"):
+                                add_content(payload.get("message", ""), skip_system=(payload.get("type") == "user_message"))
                     except json.JSONDecodeError:
                         continue
         except Exception:
@@ -1353,6 +1426,7 @@ Codex:
 
 
 def main():
+    ensure_utf8_stdio()
     parser = argparse.ArgumentParser(
         description="AI 会话记录查看器 - 支持 Claude Code, Codex",
         formatter_class=argparse.RawDescriptionHelpFormatter,

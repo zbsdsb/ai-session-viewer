@@ -14,6 +14,9 @@ AI 会话记录查看器 - 支持 Claude Code、Codex 两大 AI CLI 工具的会
 - 📤 **多格式输出**：支持文本、JSON、摘要三种输出格式
 - 🧭 **全局搜索**：支持用户+助手消息的关键词检索
 - 🗂️ **项目/时间筛选**：按项目路径与开始时间筛选会话
+- 🪟 **Windows GUI**：提供桌面窗口浏览器，支持会话列表、详情面板与恢复命令复制
+- 🖍️ **聊天内查找**：在 GUI 中高亮检索词，并支持 `Prev` / `Next` 逐个跳转命中位置
+- 🧩 **新版 Codex 兼容**：兼容 `response_item`、`event_msg` 等较新的会话事件格式
 - 🧠 **LLM总结**（可选）：使用 AI 生成智能会话摘要
 
 ## 📦 安装
@@ -28,6 +31,25 @@ chmod +x aisv
 # （可选）创建软链接到系统路径
 ln -s $(pwd)/aisv /usr/local/bin/aisv
 ```
+
+### Windows
+
+```powershell
+# CLI
+python .\session_viewer.py --summary
+
+# GUI
+python .\session_viewer_gui.py
+```
+
+如果需要打包 Windows 可执行文件：
+
+```powershell
+.\build_windows_exe.ps1
+.\build_windows_gui_exe.ps1
+```
+
+构建产物会输出到 `dist/`，默认不提交 EXE 到仓库。
 
 ## 🚀 快速开始
 
